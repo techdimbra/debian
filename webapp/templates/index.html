@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Auditoria Debian 13 XFCE</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Auditoria visual do sistema Debian 13 XFCE</h1>
+        <p>
+          Esta interface executa o script <code>debian_system_audit.sh</code> e
+          exibe o resultado diretamente no navegador. Os relatórios gerados são
+          salvos na pasta <code>webapp/reports</code> do repositório.
+        </p>
+      </header>
+
+      {% if not script_exists %}
+      <section class="card warning">
+        <h2>Script não encontrado</h2>
+        <p>
+          Não encontramos o arquivo <code>scripts/debian_system_audit.sh</code>.
+          Copie-o para o caminho esperado antes de executar a auditoria.
+        </p>
+      </section>
+      {% else %}
+      <section class="card">
+        <h2>Executar auditoria</h2>
+        <p>
+          Clique em <strong>Gerar relatório</strong> para iniciar a coleta de
+          informações. Dependendo da quantidade de dados, o processo pode levar
+          alguns minutos.
+        </p>
+        <div class="actions">
+          <button id="run-button" type="button">Gerar relatório</button>
+          <button id="clear-button" type="button" class="secondary">
+            Apagar relatórios salvos
+          </button>
+        </div>
+      </section>
+      {% endif %}
+
+      <section id="status" class="card hidden"></section>
+
+      <section class="card">
+        <h2>Saída completa</h2>
+        <pre id="output" class="output" aria-live="polite"></pre>
+      </section>
+    </main>
+
+    <template id="status-template">
+      <div class="status-message"></div>
+    </template>
+
+    <script>
+      const runButton = document.getElementById("run-button");
+      const clearButton = document.getElementById("clear-button");
+      const output = document.getElementById("output");
+      const statusBox = document.getElementById("status");
+
+      function setStatus(message, variant = "info") {
+        statusBox.textContent = "";
+        statusBox.classList.remove("hidden", "success", "error", "info");
+        statusBox.classList.add(variant);
+        statusBox.innerHTML = `<p>${message}</p>`;
+      }
+
+      async function runAudit() {
+        if (!runButton) return;
+        runButton.disabled = true;
+        if (clearButton) {
+          clearButton.disabled = true;
+        }
+        setStatus("Executando auditoria... isto pode levar alguns minutos.");
+        output.textContent = "";
+
+        try {
+          const response = await fetch("/run", { method: "POST" });
+          const data = await response.json();
+
+          if (!data.ok) {
+            const message =
+              data.message ||
+              "Ocorreu um problema ao executar o script. Veja a saída abaixo.";
+            setStatus(message, "error");
+          } else {
+            const logInfo = data.log_path
+              ? `<p>Relatório salvo em: <code>${data.log_path}</code></p>`
+              : "";
+            setStatus(
+              `Relatório finalizado com código ${data.return_code}. ${logInfo}`,
+              "success"
+            );
+          }
+
+          output.textContent = data.output || "";
+        } catch (error) {
+          setStatus(
+            "Falha na requisição. Verifique se o servidor Flask está em execução.",
+            "error"
+          );
+          output.textContent = String(error);
+        } finally {
+          if (runButton) runButton.disabled = false;
+          if (clearButton) clearButton.disabled = false;
+        }
+      }
+
+      async function clearReports() {
+        if (!clearButton) return;
+        clearButton.disabled = true;
+        if (runButton) runButton.disabled = true;
+        setStatus("Removendo relatórios anteriores...");
+        try {
+          const response = await fetch("/clear-reports", { method: "POST" });
+          const data = await response.json();
+          setStatus(
+            `Relatórios removidos: ${data.deleted || 0}.`,
+            "success"
+          );
+        } catch (error) {
+          setStatus(
+            "Não foi possível remover os relatórios salvos.",
+            "error"
+          );
+        } finally {
+          if (clearButton) clearButton.disabled = false;
+          if (runButton) runButton.disabled = false;
+        }
+      }
+
+      runButton?.addEventListener("click", runAudit);
+      clearButton?.addEventListener("click", clearReports);
+    </script>
+  </body>
+</html>

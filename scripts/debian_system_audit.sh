@@ -1,16 +1,3 @@
-# Auditoria do Debian 13 XFCE
-
-Este repositório fornece um script de auditoria (`debian_system_audit.sh`) para gerar
-um relatório completo de um Debian 13 Trixie recém-instalado com XFCE. O roteiro
-abaixo mostra como salvar o script manualmente no bloco de notas, guardar em
-`/home/kether1/Documentos/`, torná-lo executável e rodá-lo em seguida.
-
-## 1. Salvar o script usando o bloco de notas
-
-1. Abra o bloco de notas (por exemplo, o Mousepad no XFCE).
-2. Copie todo o conteúdo abaixo e cole no editor aberto:
-
-```bash
 #!/usr/bin/env bash
 # Debian 13 XFCE Initial System Audit Script
 # Generates an extensive report covering system, hardware, network,
@@ -231,56 +218,3 @@ run_or_note "Libvirt Domains" virsh list --all
 section "End of Report"
 printf "Audit completed at: %s\n" "$(date)"
 printf "Report saved to : %s\n" "$(realpath "$REPORT_FILE")"
-
-```
-
-3. No menu do editor, escolha **Arquivo → Salvar como...**.
-4. Navegue até `~/Documentos/`.
-5. Defina o nome do arquivo como `debian_system_audit.sh`.
-6. Confirme que o tipo de arquivo está como texto simples e salve.
-
-## 2. Torne o arquivo executável e rode de uma só vez
-
-Depois de salvar o arquivo, abra o Terminal e execute o comando abaixo para dar
-permissão de execução e iniciar o script imediatamente:
-
-```bash
-chmod +x ~/Documentos/debian_system_audit.sh && ~/Documentos/debian_system_audit.sh
-```
-
-O relatório final será salvo no diretório onde o comando for executado, a menos
-que você forneça um caminho diferente como argumento (por exemplo,
-`~/Documentos/debian_system_audit.sh ~/Documentos/auditoria.txt`).
-
-## 3. Recursos opcionais
-
-O script usa automaticamente ferramentas adicionais, quando disponíveis, como
-`smartctl`, `flatpak`, `virsh`, entre outras. Caso alguma delas não esteja
-instalada, a execução continua apenas com os módulos detectados.
-
-## 4. Interface HTML com tela visual
-
-Se preferir acompanhar a auditoria em uma interface web, o repositório inclui
-uma pequena aplicação Flask que executa o script e mostra a saída no navegador.
-
-1. Garanta que você tem o Python 3 instalado. Em seguida, crie um ambiente
-   virtual opcional (recomendado) e instale as dependências:
-
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r webapp/requirements.txt
-   ```
-
-2. Inicie o servidor Flask apontando para o arquivo `webapp/app.py`:
-
-   ```bash
-   python webapp/app.py
-   ```
-
-3. Abra o navegador e acesse `http://localhost:5000`. Clique em **Gerar
-   relatório** para iniciar a coleta de dados. Ao final, o relatório ficará
-   disponível no painel e também salvo em `webapp/reports/`.
-
-4. Use o botão **Apagar relatórios salvos** para remover arquivos antigos da
-   pasta `webapp/reports/` quando desejar.

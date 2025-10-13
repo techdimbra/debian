@@ -1,0 +1,141 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.6;
+  background-color: #f6f7fb;
+  color: #1f2933;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+header {
+  margin-bottom: 2rem;
+}
+
+h1,
+ h2 {
+  font-weight: 600;
+  color: #0b2545;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  padding: 1.75rem;
+  margin-bottom: 1.75rem;
+}
+
+.card.warning {
+  border: 1px solid #f97316;
+  background: #fff7ed;
+}
+
+.actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+button {
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: none;
+  padding: 0.75rem 1.75rem;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  box-shadow: 0 15px 25px rgba(37, 99, 235, 0.35);
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 35px rgba(37, 99, 235, 0.4);
+}
+
+button.secondary {
+  background: transparent;
+  border: 2px solid rgba(37, 99, 235, 0.35);
+  color: #2563eb;
+  box-shadow: none;
+}
+
+button.secondary:hover:not(:disabled) {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.output {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 1.5rem;
+  border-radius: 12px;
+  white-space: pre-wrap;
+  max-height: 480px;
+  overflow-y: auto;
+  font-family: "Fira Code", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  font-size: 0.95rem;
+}
+
+#status {
+  border-left: 6px solid transparent;
+}
+
+#status.info {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+#status.success {
+  border-color: #10b981;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+#status.error {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.hidden {
+  display: none;
+}
+
+code {
+  background: rgba(15, 23, 42, 0.08);
+  padding: 0.1rem 0.35rem;
+  border-radius: 6px;
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  button {
+    width: 100%;
+    justify-content: center;
+  }
+}

@@ -1,0 +1,3 @@
+.venv/
+webapp/reports/
+__pycache__/

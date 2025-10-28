@@ -1,0 +1,719 @@
+---
+- name: Provisiona a estação base Techdim Guardião
+  hosts: localhost
+  become: true
+  gather_facts: true
+
+  vars:
+    techdim_guardian_user: "{{ non_root_user | default('kether1-256', true) }}"
+    distro_codename: "{{ ansible_distribution_release }}"
+    virtualization_type: "{{ ansible_virtualization_type | default('physical') }}"
+    virtualization_role: "{{ ansible_virtualization_role | default('host') }}"
+    is_virtualized: "{{ virtualization_role == 'guest' }}"
+    apt_arch: "{{ 'amd64' if ansible_architecture in ['x86_64', 'amd64'] else ansible_architecture }}"
+    toolbox_version: "2.3.1.28450"
+    toolbox_filename: "jetbrains-toolbox-{{ toolbox_version }}.tar.gz"
+    toolbox_url: "https://download.jetbrains.com/toolbox/{{ toolbox_filename }}"
+    toolbox_extract_dir: "/opt/jetbrains-toolbox/jetbrains-toolbox-{{ toolbox_version }}"
+    pipx_packages:
+      - openai
+      - google-generativeai
+      - anthropic
+      - tiktoken
+      - langchain-cli
+    base_utilities:
+      - curl
+      - gpg
+      - apt-transport-https
+      - wget
+      - ca-certificates
+      - gnupg2
+      - lsb-release
+      - software-properties-common
+      - unzip
+      - tar
+    hardening_packages:
+      - unattended-upgrades
+      - needrestart
+      - apt-listchanges
+    security_packages:
+      - ufw
+      - fail2ban
+      - keepassxc
+      - macchanger
+      - apparmor-profiles
+      - apparmor-utils
+      - auditd
+      - audispd-plugins
+      - clamav
+      - clamav-daemon
+      - rkhunter
+      - lynis
+      - chkrootkit
+      - debsums
+      - logwatch
+      - wireguard-tools
+      - wireguard
+    dev_packages:
+      - build-essential
+      - python3-dev
+      - python3-venv
+      - python3-pip
+      - python3-full
+      - pkg-config
+      - git
+      - tmux
+      - htop
+      - tree
+      - jq
+      - yq
+      - ansible
+    productivity_packages:
+      - code
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+      - google-cloud-sdk
+      - gh
+      - azure-cli
+      - awscli
+      - terraform
+      - packer
+      - 1password-cli
+      - kubectl
+    comm_packages:
+      - telegram-desktop
+      - signal-desktop
+      - thunderbird
+    privacy_packages:
+      - nmap
+      - wireshark
+      - tcpdump
+      - torbrowser-launcher
+      - tor
+      - tor-geoipdb
+      - nyx
+      - proxychains4
+    isolation_packages:
+      - firejail
+      - firetools
+      - bubblewrap
+      - podman
+      - podman-docker
+      - buildah
+      - skopeo
+    virtualization_packages:
+      - qemu-kvm
+      - libvirt-clients
+      - libvirt-daemon-system
+      - virt-manager
+      - virt-viewer
+      - virtinst
+      - bridge-utils
+      - dnsmasq-base
+      - spice-client-gtk
+    android_packages:
+      - default-jdk
+      - android-sdk
+      - cmdtest
+      - adb
+      - fastboot
+      - scrcpy
+    sysctl_hardening:
+      net.ipv4.conf.all.rp_filter: 1
+      net.ipv4.conf.default.rp_filter: 1
+      net.ipv4.tcp_syncookies: 1
+      net.ipv4.conf.all.accept_redirects: 0
+      net.ipv4.conf.default.accept_redirects: 0
+      net.ipv4.conf.all.send_redirects: 0
+      net.ipv6.conf.all.accept_redirects: 0
+      net.ipv6.conf.default.accept_redirects: 0
+      net.ipv4.icmp_echo_ignore_broadcasts: 1
+      kernel.kptr_restrict: 2
+      kernel.randomize_va_space: 2
+    vm_sysctl_hardening:
+      vm.swappiness: 10
+      vm.dirty_background_ratio: 5
+      vm.dirty_ratio: 10
+    clamav_scan_schedule: "30 2 * * 0"
+    lynis_scan_schedule: "0 3 * * *"
+    kubernetes_channel: "stable"
+    kubernetes_version: "v1.30"
+
+  pre_tasks:
+    - name: Certifica que o usuário alvo não é root
+      ansible.builtin.assert:
+        that:
+          - techdim_guardian_user is string
+          - techdim_guardian_user | length > 0
+          - techdim_guardian_user != 'root'
+        fail_msg: "Informe o usuário humano padrão usando -e non_root_user=<usuario>. Por padrão este playbook está preparado para 'kether1-256'."
+
+  tasks:
+    - name: Adiciona contrib, non-free e non-free-firmware aos repositórios principais
+      ansible.builtin.replace:
+        path: /etc/apt/sources.list
+        regexp: '^(deb\s+.*?\s+main)(?!.*contrib)(.*)$'
+        replace: '\1 contrib non-free non-free-firmware\2'
+      notify: Atualiza repositórios apt
+
+    - name: Atualiza cache e executa upgrade completo
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+
+    - name: Instala utilitários base
+      ansible.builtin.apt:
+        name: "{{ base_utilities }}"
+        state: present
+
+    - name: Instala pacotes de hardening
+      ansible.builtin.apt:
+        name: "{{ hardening_packages }}"
+        state: present
+
+    - name: Aplica parâmetros sysctl
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/90-techdim-guardian.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          {% for key, value in sysctl_hardening.items() %}{{ key }}={{ value }}
+          {% endfor %}
+      notify: Recarrega sysctl
+
+    - name: Configura unattended-upgrades
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/51unattended-upgrades-techdim
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          Unattended-Upgrade::Origins-Pattern {
+                  "origin=Debian,codename={{ distro_codename }}";
+                  "origin=Debian,codename={{ distro_codename }}-updates";
+                  "origin=Debian,codename={{ distro_codename }}-security";
+          };
+          Unattended-Upgrade::Remove-Unused-Dependencies "true";
+          Unattended-Upgrade::Automatic-Reboot "false";
+          Unattended-Upgrade::MinimalSteps "true";
+
+    - name: Habilita serviço unattended-upgrades
+      ansible.builtin.systemd:
+        name: unattended-upgrades
+        state: started
+        enabled: true
+
+    - name: Instala pacotes de segurança
+      ansible.builtin.apt:
+        name: "{{ security_packages }}"
+        state: present
+
+    - name: Configura UFW - reset
+      ansible.builtin.command: ufw --force reset
+      register: ufw_reset
+      changed_when: "'reset' in ufw_reset.stdout"
+
+    - name: Configura UFW - políticas padrão
+      ansible.builtin.command: ufw default deny incoming
+      changed_when: false
+
+    - name: Configura UFW - libera saída
+      ansible.builtin.command: ufw default allow outgoing
+      changed_when: false
+
+    - name: Configura UFW - limitar SSH
+      ansible.builtin.command: ufw limit ssh
+      changed_when: false
+
+    - name: Configura UFW - libera WireGuard
+      ansible.builtin.command: ufw allow 51820/udp comment 'WireGuard'
+      changed_when: false
+
+    - name: Habilita UFW
+      ansible.builtin.command: ufw --force enable
+      changed_when: false
+
+    - name: Configura Fail2Ban
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/techdim-guardian.local
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [DEFAULT]
+          banaction = ufw
+          findtime = 1h
+          bantime = 12h
+          maxretry = 4
+
+          [sshd]
+          enabled = true
+          port    = ssh
+          logpath = /var/log/auth.log
+          backend = systemd
+      notify: Reinicia Fail2Ban
+
+    - name: Garante que serviços críticos estejam ativos
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - apparmor
+        - auditd
+        - clamav-daemon
+        - clamav-freshclam
+        - fail2ban
+
+    - name: Atualiza definições do ClamAV
+      ansible.builtin.command: freshclam
+      register: clamav_update
+      changed_when: false
+      failed_when: false
+
+    - name: Obtém URL mais recente do VeraCrypt
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://www.veracrypt.fr/en/Downloads.html \
+          | grep -o 'https://launchpad.net/veracrypt/trunk/[0-9A-Za-z\.-]*/+download/veracrypt-[0-9A-Za-z\.-]*-Debian-12-amd64.deb' \
+          | head -n 1
+      args:
+        executable: /bin/bash
+      register: veracrypt_url
+      changed_when: false
+
+    - name: Define URL fallback do VeraCrypt
+      ansible.builtin.set_fact:
+        veracrypt_download_url: "{{ veracrypt_url.stdout if veracrypt_url.stdout != '' else 'https://launchpad.net/veracrypt/trunk/1.26.7/+download/veracrypt-1.26.7-Debian-12-amd64.deb' }}"
+
+    - name: Baixa pacote VeraCrypt
+      ansible.builtin.get_url:
+        url: "{{ veracrypt_download_url }}"
+        dest: /tmp/veracrypt.deb
+        mode: '0644'
+
+    - name: Instala VeraCrypt
+      ansible.builtin.apt:
+        deb: /tmp/veracrypt.deb
+
+    - name: Remove pacote VeraCrypt temporário
+      ansible.builtin.file:
+        path: /tmp/veracrypt.deb
+        state: absent
+
+    - name: Instala pacotes de desenvolvimento
+      ansible.builtin.apt:
+        name: "{{ dev_packages }}"
+        state: present
+
+    - name: Garante que pip esteja atualizado
+      ansible.builtin.pip:
+        name: pip
+        executable: pip3
+        state: latest
+
+    - name: Cria diretório de keyrings APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Adiciona repositório Docker
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://download.docker.com/linux/debian/gpg
+            dest: /etc/apt/keyrings/docker.asc
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: docker
+            repo: "deb [arch={{ apt_arch }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{ distro_codename }} stable"
+            state: present
+
+    - name: Adiciona repositório VSCode
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://packages.microsoft.com/keys/microsoft.asc
+            dest: /etc/apt/trusted.gpg.d/microsoft.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: vscode
+            repo: "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main"
+            state: present
+
+    - name: Define codename compatível para Azure CLI
+      ansible.builtin.set_fact:
+        azure_repo_codename: "{{ 'bookworm' if distro_codename in ['trixie', 'forky'] else distro_codename }}"
+
+    - name: Adiciona repositório Azure CLI
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://packages.microsoft.com/keys/microsoft.asc
+            dest: /etc/apt/trusted.gpg.d/microsoft-azure.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: azure-cli
+            repo: "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/microsoft-azure.gpg] https://packages.microsoft.com/repos/azure-cli/ {{ azure_repo_codename }} main"
+            state: present
+
+    - name: Adiciona repositório Google Cloud SDK
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+            dest: /etc/apt/keyrings/google-cloud.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: google-cloud-sdk
+            repo: "deb [signed-by=/etc/apt/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
+            state: present
+
+    - name: Adiciona repositório GitHub CLI
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+            dest: /usr/share/keyrings/githubcli-archive-keyring.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: github-cli
+            repo: "deb [arch={{ apt_arch }} signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+            state: present
+
+    - name: Adiciona repositório HashiCorp
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://apt.releases.hashicorp.com/gpg
+            dest: /etc/apt/keyrings/hashicorp-archive-keyring.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: hashicorp
+            repo: "deb [signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com {{ distro_codename }} main"
+            state: present
+
+    - name: Adiciona repositório Signal Desktop
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://updates.signal.org/desktop/apt/keys.asc
+            dest: /etc/apt/keyrings/signal-desktop.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: signal-desktop
+            repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/signal-desktop.gpg] https://updates.signal.org/desktop/apt stable main"
+            state: present
+
+    - name: Adiciona repositório 1Password CLI
+      ansible.builtin.block:
+        - ansible.builtin.get_url:
+            url: https://downloads.1password.com/linux/keys/1password.asc
+            dest: /etc/apt/keyrings/1password.gpg
+            mode: '0644'
+        - ansible.builtin.apt_repository:
+            filename: 1password
+            repo: "deb [arch={{ apt_arch }} signed-by=/etc/apt/keyrings/1password.gpg] https://downloads.1password.com/linux/debian/amd64 stable main"
+            state: present
+
+    - name: Adiciona repositório Kubernetes
+      ansible.builtin.block:
+        - ansible.builtin.shell: |
+            set -o pipefail
+            curl -fsSL https://pkgs.k8s.io/core:/{{ kubernetes_channel }}:/{{ kubernetes_version }}/deb/Release.key \
+              | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          args:
+            executable: /bin/bash
+        - ansible.builtin.apt_repository:
+            filename: kubernetes
+            repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/{{ kubernetes_channel }}:/{{ kubernetes_version }}/deb/ /"
+            state: present
+
+    - name: Atualiza cache APT após adicionar repositórios
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Instala pacotes de produtividade e CLIs
+      ansible.builtin.apt:
+        name: "{{ productivity_packages }}"
+        state: present
+
+    - name: Instala pacotes de comunicação
+      ansible.builtin.apt:
+        name: "{{ comm_packages }}"
+        state: present
+
+    - name: Configura docker para usuário alvo
+      ansible.builtin.user:
+        name: "{{ techdim_guardian_user }}"
+        groups: docker
+        append: true
+
+    - name: Garante Docker ativo
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+      failed_when: false
+
+    - name: Instala pacotes de privacidade
+      ansible.builtin.apt:
+        name: "{{ privacy_packages }}"
+        state: present
+
+    - name: Instala ferramentas de isolamento
+      ansible.builtin.apt:
+        name: "{{ isolation_packages }}"
+        state: present
+
+    - name: Instala pilha de virtualização
+      ansible.builtin.apt:
+        name: "{{ virtualization_packages }}"
+        state: present
+
+    - name: Ativa serviços de virtualização
+      ansible.builtin.systemd:
+        name: libvirtd
+        enabled: true
+        state: started
+
+    - name: Adiciona usuário aos grupos de virtualização
+      ansible.builtin.user:
+        name: "{{ techdim_guardian_user }}"
+        groups: libvirt
+        append: true
+
+    - name: Habilita rede default do libvirt
+      ansible.builtin.command: virsh net-autostart default
+      register: libvirt_autostart
+      changed_when: "'marked as autostarted' in libvirt_autostart.stdout"
+      failed_when: false
+
+    - name: Garante rede default do libvirt ativa
+      ansible.builtin.command: virsh net-start default
+      register: libvirt_start
+      changed_when: "'started' in libvirt_start.stdout"
+      failed_when: false
+
+    - name: Cria perfis adicionais do Firejail
+      ansible.builtin.copy:
+        dest: /etc/firejail/firefox.profile
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Techdim Guardião hardened profile
+          #include <firefox.profile>
+          restrict-namespaces
+          seccomp
+          private
+          private-tmp
+
+    - name: Instala pacotes Android
+      ansible.builtin.apt:
+        name: "{{ android_packages }}"
+        state: present
+
+    - name: Configura diretório Android SDK
+      ansible.builtin.file:
+        path: /opt/android-sdk
+        state: directory
+        mode: '0755'
+
+    - name: Ajusta link simbólico do SDK para o usuário
+      ansible.builtin.file:
+        path: "/home/{{ techdim_guardian_user }}/Android"
+        state: directory
+        owner: "{{ techdim_guardian_user }}"
+        group: "{{ techdim_guardian_user }}"
+        mode: '0755'
+
+    - name: Linka SDK na pasta do usuário
+      ansible.builtin.file:
+        src: /opt/android-sdk
+        dest: "/home/{{ techdim_guardian_user }}/Android/Sdk"
+        state: link
+        owner: "{{ techdim_guardian_user }}"
+        group: "{{ techdim_guardian_user }}"
+
+    - name: Exporta variáveis do Android SDK
+      ansible.builtin.copy:
+        dest: /etc/profile.d/android-sdk.sh
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          export ANDROID_HOME=/opt/android-sdk
+          export ANDROID_SDK_ROOT=/opt/android-sdk
+          export PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator
+
+    - name: Cria diretório do JetBrains Toolbox
+      ansible.builtin.file:
+        path: /opt/jetbrains-toolbox
+        state: directory
+        mode: '0755'
+
+    - name: Baixa JetBrains Toolbox
+      ansible.builtin.get_url:
+        url: "{{ toolbox_url }}"
+        dest: "/tmp/{{ toolbox_filename }}"
+        mode: '0644'
+
+    - name: Extrai JetBrains Toolbox
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ toolbox_filename }}"
+        dest: /opt/jetbrains-toolbox
+        remote_src: true
+        creates: "{{ toolbox_extract_dir }}"
+
+    - name: Cria link simbólico para JetBrains Toolbox
+      ansible.builtin.file:
+        src: "{{ toolbox_extract_dir }}/jetbrains-toolbox"
+        dest: /usr/local/bin/jetbrains-toolbox
+        state: link
+
+    - name: Cria atalho desktop para JetBrains Toolbox
+      ansible.builtin.copy:
+        dest: /usr/share/applications/jetbrains-toolbox.desktop
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=JetBrains Toolbox
+          Exec={{ toolbox_extract_dir }}/jetbrains-toolbox
+          Icon={{ toolbox_extract_dir }}/icon.svg
+          Categories=Development;IDE;
+          Terminal=false
+
+    - name: Remove arquivo temporário do JetBrains Toolbox
+      ansible.builtin.file:
+        path: "/tmp/{{ toolbox_filename }}"
+        state: absent
+
+    - name: Cria diretório de scripts auxiliares
+      ansible.builtin.file:
+        path: /opt/techdim-guardian/bin
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Instala script de backup EFI
+      ansible.builtin.copy:
+        dest: /opt/techdim-guardian/bin/backup-efi.sh
+        owner: root
+        group: root
+        mode: '0700'
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          date_str=$(date +%Y%m%d-%H%M%S)
+          backup_dir="/root/efi-backups"
+          mkdir -p "$backup_dir"
+          if [ -d /boot/efi ]; then
+            tar -cpzf "$backup_dir/efi-backup-${date_str}.tar.gz" -C /boot efi
+            echo "Backup EFI criado em $backup_dir/efi-backup-${date_str}.tar.gz"
+          else
+            echo "Partição EFI não encontrada."
+            exit 1
+          fi
+
+    - name: Agenda auditoria diária com Lynis
+      ansible.builtin.copy:
+        dest: /etc/cron.d/lynis-audit
+        owner: root
+        group: root
+        mode: '0644'
+        content: "{{ lynis_scan_schedule }} root /usr/sbin/lynis audit system --quiet --logfile /var/log/lynis.log\n"
+
+    - name: Agenda relatório diário do logwatch
+      ansible.builtin.copy:
+        dest: /etc/cron.daily/00logwatch
+        owner: root
+        group: root
+        mode: '0755'
+        content: |
+          #!/bin/sh
+          /usr/sbin/logwatch --output mail --mailto root --detail low
+
+    - name: Agenda varredura semanal do ClamAV
+      ansible.builtin.copy:
+        dest: /etc/cron.d/clamav-weekly
+        owner: root
+        group: root
+        mode: '0644'
+        content: "{{ clamav_scan_schedule }} root /usr/bin/clamscan -ri / --log=/var/log/clamav/weekly-scan.log || true\n"
+
+    - name: Aplica ajustes extras para ambientes virtualizados
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/95-techdim-vm.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          {% for key, value in vm_sysctl_hardening.items() %}{{ key }}={{ value }}
+          {% endfor %}
+      when: is_virtualized | bool
+      notify: Recarrega sysctl
+
+    - name: Restringe permissões da pasta root
+      ansible.builtin.file:
+        path: /root
+        mode: '0700'
+
+    - name: Instala pipx
+      ansible.builtin.apt:
+        name: pipx
+        state: present
+
+    - name: Garante pipx no PATH do sistema
+      ansible.builtin.copy:
+        dest: /etc/profile.d/pipx.sh
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          export PATH="$PATH:$HOME/.local/bin"
+
+    - name: Instala CLIs Python com pipx
+      become: true
+      become_user: "{{ techdim_guardian_user }}"
+      ansible.builtin.command: "pipx install {{ item }}"
+      args:
+        creates: "/home/{{ techdim_guardian_user }}/.local/pipx/venvs/{{ item }}"
+      loop: "{{ pipx_packages }}"
+
+    - name: Reinstala pipx ensurepath para o usuário
+      become: true
+      become_user: "{{ techdim_guardian_user }}"
+      ansible.builtin.command: pipx ensurepath
+      changed_when: false
+
+    - name: Configura cron do ClamAV log directory
+      ansible.builtin.file:
+        path: /var/log/clamav
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Limpa pacotes desnecessários
+      ansible.builtin.apt:
+        autoremove: true
+        autoclean: true
+
+  handlers:
+    - name: Recarrega sysctl
+      ansible.builtin.command: sysctl --system
+      become: true
+      changed_when: false
+
+    - name: Reinicia Fail2Ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: Atualiza repositórios apt
+      ansible.builtin.apt:
+        update_cache: true
